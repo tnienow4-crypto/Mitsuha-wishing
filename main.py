@@ -371,7 +371,7 @@ def fetch_today_special_days(config: Config) -> List[str]:
     return fetch_special_days_for_ist_date(config, ist_now().date())
 
 def generate_wish(config: Config, special_days: List[str], *, date_ist: Optional[datetime.date] = None) -> str:
-    """Generates one universal Mitsuha-style wish using Ollama."""
+    """Generates one universal Mitsuha-style wish body for DMs using Ollama."""
     joined = ", ".join(special_days)
     date_ist = date_ist or ist_now().date()
     date_str = datetime.datetime.combine(date_ist, datetime.time.min).strftime("%d %b %Y")
@@ -379,16 +379,21 @@ def generate_wish(config: Config, special_days: List[str], *, date_ist: Optional
     prompt = (
         "You are Mitsuha — a cute little school girl from CSD (Chaos Show Down). "
         "You want to make friends with everyone in the Discord server. "
-        "Write ONE short, heartwarming, human-sounding message for the whole server. "
-        "Keep it friendly and slightly shy, like you're trying to make new friends. "
-        "No hashtags. No emojis spam (0-2 max). No @everyone. "
+        "Write ONE heartwarming, elaborate, human-sounding DM wish that can be sent to any member. "
+        "Make it feel like you're talking directly to one person, warmly and a bit shy, like you're trying to make a new friend. "
+        "Style: short poem / lyrical message (not rhymes required), with cute decorative lines. "
+        "No hashtags. No @everyone. Use more emojis and decorations, but keep it tasteful (about 5–10 emojis total). "
+        "Prefer festival/holiday-relevant emojis (based on the holiday names). "
         "End with a tiny signature like '— Mitsuha (CSD)'.\n\n"
         f"Date (IST): {date_str}\n"
         f"Today's globally relevant holiday/special day(s): {joined}\n\n"
         "Message requirements:\n"
         "- Mention the holiday name(s) naturally\n"
-        "- Invite members to say hi / be friends\n"
-        "- 2–5 short lines\n"
+        "- Make the reader feel seen and special (but keep it wholesome)\n"
+        "- Invite them to say hi / be friends\n"
+        "- 8–14 short lines (not one huge paragraph)\n"
+        "- Include 1–2 decorative separators like '⋆｡°✩' or '╰(*´︶`*)╯' (ASCII/Unicode ok)\n"
+        "- Keep it under 1800 characters\n"
     )
 
     try:
@@ -407,6 +412,66 @@ def generate_wish(config: Config, special_days: List[str], *, date_ist: Optional
         print(f"Error generating wish via Ollama: {exc}")
 
     return f"Happy {joined}! Hope your day feels a little brighter. — Mitsuha (CSD)"
+
+
+def generate_channel_wish(
+    config: Config,
+    special_days: List[str],
+    *,
+    date_ist: Optional[datetime.date] = None,
+) -> str:
+    """Generates a channel announcement style wish that includes @everyone."""
+    joined = ", ".join(special_days)
+    date_ist = date_ist or ist_now().date()
+    date_str = datetime.datetime.combine(date_ist, datetime.time.min).strftime("%d %b %Y")
+
+    prompt = (
+        "You are Mitsuha — a cute little school girl from CSD (Chaos Show Down). "
+        "Write ONE channel announcement message for the whole Discord server audience. "
+        "It must start with '@everyone' on the first line. "
+        "Make it warm, inclusive, and make everyone feel special together. "
+        "No hashtags. Keep emojis to 0–3 max. "
+        "End with a tiny signature like '— Mitsuha (CSD)'.\n\n"
+        f"Date (IST): {date_str}\n"
+        f"Today's globally relevant holiday/special day(s): {joined}\n\n"
+        "Message requirements:\n"
+        "- Mention the holiday name(s) naturally\n"
+        "- Speak to the whole community (plural: everyone / you all / friends)\n"
+        "- 4–8 short lines (not one huge paragraph)\n"
+        "- Keep it under 1200 characters\n"
+    )
+
+    try:
+        ollama_client = Client(
+            host=config.ollama_host,
+            headers={"Authorization": "Bearer " + config.ollama_api_key} if config.ollama_api_key else None,
+        )
+        response = ollama_client.chat(
+            model=config.ollama_model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = ((response or {}).get("message") or {}).get("content")
+        if isinstance(text, str) and text.strip():
+            out = text.strip()
+            if not out.splitlines()[0].strip().startswith("@everyone"):
+                out = "@everyone\n" + out
+            return out
+    except Exception as exc:
+        print(f"Error generating channel wish via Ollama: {exc}")
+
+    return f"@everyone\nHappy {joined}! Wishing you all a bright day together. — Mitsuha (CSD)"
+
+
+def personalize_dm_message(wish_body: str, display_name: str) -> str:
+    name = (display_name or "").strip() or "there"
+    # Same wish for everyone; only the name changes.
+    return (
+        f"Hey {name} ✨\n"
+        f"⋆｡°✩⋆｡°✩⋆｡°✩\n\n"
+        f"{wish_body}\n\n"
+        f"⋆｡°✩⋆｡°✩⋆｡°✩\n"
+        f"P.S. {name}… if you want, say hi back — I'd really love to be friends 🌸"
+    )
 
 
 async def get_guild(client_: discord.Client, guild_id: int) -> Optional[discord.Guild]:
@@ -448,8 +513,10 @@ async def on_ready():
             return
 
         print(f"Found special day(s): {special_days}")
-        wish_message = generate_wish(config, special_days, date_ist=date_ist)
-        print(f"Generated wish length: {len(wish_message)}")
+        dm_wish_body = generate_wish(config, special_days, date_ist=date_ist)
+        channel_wish = generate_channel_wish(config, special_days, date_ist=date_ist)
+        print(f"Generated DM wish length: {len(dm_wish_body)}")
+        print(f"Generated channel wish length: {len(channel_wish)}")
 
         guild = await get_guild(client, config.guild_id)
         if guild is None:
@@ -495,16 +562,20 @@ async def on_ready():
         # Always post the wish in the configured channel (stickers are allowed in-channel).
         try:
             channel = await client.fetch_channel(config.fallback_channel_id)
+            allowed = discord.AllowedMentions(everyone=True, users=False, roles=False)
             if sticker is not None:
-                try:
-                    await channel.send(wish_message, stickers=[sticker])
+                        "Keep the overall structure the same: short lines, clear, friendly. "
+                        "Add decorative elements and more emojis related to the holiday(s) (about 4–8 emojis total). "
+                        "No hashtags. "
+                    await channel.send(channel_wish, stickers=[sticker], allowed_mentions=allowed)
                 except discord.HTTPException as exc:
                     print(f"Sticker send failed in channel: {exc}")
-                    await channel.send(wish_message)
+                    await channel.send(channel_wish, allowed_mentions=allowed)
             else:
-                await channel.send(wish_message)
+                await channel.send(channel_wish, allowed_mentions=allowed)
         except Exception as exc:
-            print(f"Failed to post wish in channel {config.fallback_channel_id}: {exc}")
+                        "- Include 1 decorative separator line (e.g., '✦✧✦' or '⋆｡°✩')\n"
+                        "- Keep it under 1200 characters\n"
 
         dm_disabled_known = load_dm_disabled()
         dm_disabled_updated = set(dm_disabled_known)
@@ -513,7 +584,8 @@ async def on_ready():
         async for member in iter_human_members(guild):
             try:
                 # DMs are always text-only. (Guild stickers are not permitted in DMs.)
-                await member.send(wish_message)
+                dm_text = personalize_dm_message(dm_wish_body, member.display_name)
+                await member.send(dm_text)
                 if member.id in dm_disabled_updated:
                     dm_disabled_updated.discard(member.id)
                 await asyncio.sleep(0.6)

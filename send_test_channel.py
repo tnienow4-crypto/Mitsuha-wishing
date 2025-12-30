@@ -7,7 +7,7 @@ import discord
 from main import (
     _stable_daily_index,
     fetch_special_days_for_ist_date,
-    generate_wish,
+    generate_channel_wish,
     load_config,
     pick_sticker_by_ai,
 )
@@ -28,7 +28,7 @@ async def run(*, date_ist: datetime.date, channel_id: int | None) -> int:
                     print("No holiday/special day found for that date; not sending.")
                     return
 
-                wish_message = generate_wish(config, special_days, date_ist=date_ist)
+                wish_message = generate_channel_wish(config, special_days, date_ist=date_ist)
 
                 # Resolve a CSD sticker the same way main.py does.
                 sticker = None
@@ -78,16 +78,18 @@ async def run(*, date_ist: datetime.date, channel_id: int | None) -> int:
                 channel_name = getattr(channel, "name", None)
                 print(f"Channel: {target_channel_id}{' (' + channel_name + ')' if channel_name else ''}")
 
+                allowed = discord.AllowedMentions(everyone=True, users=False, roles=False)
+
                 if sticker is not None:
                     try:
-                        await channel.send(wish_message, stickers=[sticker])
+                        await channel.send(wish_message, stickers=[sticker], allowed_mentions=allowed)
                         print("Channel message sent (with sticker).")
                     except discord.HTTPException as exc:
                         print(f"Channel sticker send failed, sending text-only. Reason: {exc}")
-                        await channel.send(wish_message)
+                        await channel.send(wish_message, allowed_mentions=allowed)
                         print("Channel message sent (text-only).")
                 else:
-                    await channel.send(wish_message)
+                    await channel.send(wish_message, allowed_mentions=allowed)
                     print("Channel message sent (text-only, no sticker resolved).")
             finally:
                 await client.close()

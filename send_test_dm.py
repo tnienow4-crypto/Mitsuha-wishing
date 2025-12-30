@@ -9,6 +9,7 @@ from main import (
     fetch_special_days_for_ist_date,
     generate_wish,
     load_config,
+    personalize_dm_message,
     pick_sticker_by_ai,
 )
 
@@ -74,16 +75,23 @@ async def run(user_id: int, date_ist: datetime.date) -> int:
 
             try:
                 user = await client.fetch_user(user_id)
+                display_name = (
+                    getattr(user, "display_name", None)
+                    or getattr(user, "global_name", None)
+                    or getattr(user, "name", None)
+                    or "there"
+                )
+                dm_text = personalize_dm_message(wish_message, str(display_name))
                 if sticker is not None:
                     try:
-                        await user.send(wish_message, stickers=[sticker])
+                        await user.send(dm_text, stickers=[sticker])
                         print("DM sent (with sticker).")
                     except discord.HTTPException as exc:
                         print(f"DM sticker rejected by Discord, sending text-only. Reason: {exc}")
-                        await user.send(wish_message)
+                        await user.send(dm_text)
                         print("DM sent (text-only).")
                 else:
-                    await user.send(wish_message)
+                    await user.send(dm_text)
                     print("DM sent (text-only, no sticker resolved).")
             except discord.Forbidden:
                 print("DM failed: user has DMs disabled or blocked the bot.")
