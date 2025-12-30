@@ -564,9 +564,7 @@ async def on_ready():
             channel = await client.fetch_channel(config.fallback_channel_id)
             allowed = discord.AllowedMentions(everyone=True, users=False, roles=False)
             if sticker is not None:
-                        "Keep the overall structure the same: short lines, clear, friendly. "
-                        "Add decorative elements and more emojis related to the holiday(s) (about 4–8 emojis total). "
-                        "No hashtags. "
+                try:
                     await channel.send(channel_wish, stickers=[sticker], allowed_mentions=allowed)
                 except discord.HTTPException as exc:
                     print(f"Sticker send failed in channel: {exc}")
@@ -574,8 +572,7 @@ async def on_ready():
             else:
                 await channel.send(channel_wish, allowed_mentions=allowed)
         except Exception as exc:
-                        "- Include 1 decorative separator line (e.g., '✦✧✦' or '⋆｡°✩')\n"
-                        "- Keep it under 1200 characters\n"
+            print(f"Failed to post wish in channel {config.fallback_channel_id}: {exc}")
 
         dm_disabled_known = load_dm_disabled()
         dm_disabled_updated = set(dm_disabled_known)
