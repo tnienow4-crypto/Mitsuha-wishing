@@ -35,6 +35,8 @@ jobs:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
           DISCORD_FALLBACK_CHANNEL_ID: ${{ secrets.DISCORD_FALLBACK_CHANNEL_ID }}
+          DISCORD_STICKER_PREFIX: ${{ secrets.DISCORD_STICKER_PREFIX }}
+          DISCORD_STICKER_PICK_MODE: ${{ secrets.DISCORD_STICKER_PICK_MODE }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           GOOGLE_CALENDAR_IDS: ${{ secrets.GOOGLE_CALENDAR_IDS }}
           OLLAMA_HOST: ${{ secrets.OLLAMA_HOST }}
