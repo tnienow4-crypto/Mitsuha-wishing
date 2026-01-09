@@ -3,8 +3,9 @@ import argparse
 import datetime
 import json
 import os
+import re
 from dataclasses import dataclass
-from typing import Iterable, List, Optional, Set, Tuple
+from typing import Any, Iterable, List, Optional, Set, Tuple
 from urllib.parse import quote
 
 import discord
@@ -318,6 +319,356 @@ def save_dm_disabled(user_ids: Set[int]) -> None:
     with open(DM_DISABLED_PATH, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2)
 
+
+# --------------------------------------------------------------------------- #
+# TIME THEMES & EMBED UTILITIES
+# --------------------------------------------------------------------------- #
+
+# Time-of-day theme configurations for embeds
+TIME_THEMES = {
+    "Morning": {
+        "color": 0xFFD700,  # Golden sunrise
+        "emoji": "🌅",
+        "greeting": "Rise & Shine!",
+        "decorative_line": "═══════════════════════════",
+    },
+    "Noon": {
+        "color": 0xFF6B35,  # Bright orange sun
+        "emoji": "☀️",
+        "greeting": "Midday Vibes!",
+        "decorative_line": "═══════════════════════════",
+    },
+    "Afternoon": {
+        "color": 0xFFA500,  # Warm orange
+        "emoji": "🌤️",
+        "greeting": "Afternoon Bliss!",
+        "decorative_line": "═══════════════════════════",
+    },
+    "Evening": {
+        "color": 0x9B59B6,  # Purple twilight
+        "emoji": "🌆",
+        "greeting": "Evening Serenity!",
+        "decorative_line": "═══════════════════════════",
+    },
+    "Night": {
+        "color": 0x2C3E50,  # Deep night blue
+        "emoji": "🌙",
+        "greeting": "Sweet Dreams!",
+        "decorative_line": "═══════════════════════════",
+    },
+}
+
+# Holiday-specific themes for special occasions
+HOLIDAY_THEMES = {
+    "christmas": {"color": 0x228B22, "emoji": "🎄"},
+    "new year": {"color": 0xFFD700, "emoji": "🎆"},
+    "diwali": {"color": 0xFF6600, "emoji": "🪔"},
+    "holi": {"color": 0xFF1493, "emoji": "🎨"},
+    "eid": {"color": 0x008000, "emoji": "🌙"},
+    "valentine": {"color": 0xFF69B4, "emoji": "💕"},
+    "independence": {"color": 0xFF9933, "emoji": "🇮🇳"},
+    "republic": {"color": 0xFF9933, "emoji": "🇮🇳"},
+    "halloween": {"color": 0xFF6600, "emoji": "🎃"},
+    "easter": {"color": 0xFFB6C1, "emoji": "🐰"},
+    "thanksgiving": {"color": 0xD2691E, "emoji": "🦃"},
+}
+
+_MENTION_RE = re.compile(r"<@&?\d+>|<@!?\d+>")
+_CUSTOM_EMOJI_RE = re.compile(r"<a?:[A-Za-z0-9_~]+:\d+>")
+
+
+def strip_discord_mentions(text: str) -> str:
+    """Remove Discord mentions from text."""
+    if not text:
+        return ""
+    text = text.replace("@everyone", "everyone").replace("@here", "here")
+    text = _MENTION_RE.sub("", text)
+    text = text.replace("@", "")
+    return text.strip()
+
+
+def strip_unicode_emojis(text: str) -> str:
+    """Remove Unicode emojis from text, keeping custom Discord emojis."""
+    if not text:
+        return ""
+    out: list[str] = []
+    for ch in text:
+        code = ord(ch)
+        if (
+            0x1F000 <= code <= 0x1FAFF
+            or 0x2600 <= code <= 0x26FF
+            or 0x2700 <= code <= 0x27BF
+            or 0xFE00 <= code <= 0xFE0F
+            or 0x1F1E6 <= code <= 0x1F1FF
+        ):
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
+def get_time_of_day_from_ist() -> str:
+    """Determine time of day based on IST."""
+    now = ist_now()
+    hour = now.hour
+    if 5 <= hour < 11:
+        return "Morning"
+    if 11 <= hour < 15:
+        return "Noon"
+    if 15 <= hour < 18:
+        return "Afternoon"
+    if 18 <= hour < 21:
+        return "Evening"
+    return "Night"
+
+
+def get_holiday_theme(special_days: List[str]) -> Optional[dict]:
+    """Get a holiday-specific theme if applicable."""
+    joined = " ".join(special_days).lower()
+    for keyword, theme in HOLIDAY_THEMES.items():
+        if keyword in joined:
+            return theme
+    return None
+
+
+async def fetch_guild_emojis_and_stickers(guild: discord.Guild):
+    """Fetch guild custom emojis and stickers."""
+    try:
+        emojis = await guild.fetch_emojis()
+    except Exception:
+        emojis = list(getattr(guild, "emojis", []))
+
+    try:
+        stickers = await guild.fetch_stickers()
+    except Exception:
+        stickers = list(getattr(guild, "stickers", []))
+
+    return emojis, stickers
+
+
+def pick_random_emojis(
+    emojis: List[Any],
+    count: int = 3,
+    date_ist: Optional[datetime.date] = None,
+) -> List[Any]:
+    """Pick random custom emojis, stable for a given date."""
+    if not emojis:
+        return []
+    date_ist = date_ist or ist_now().date()
+    # Use date hash for stable selection
+    seed = hash(date_ist.isoformat()) & 0x7FFFFFFF
+    indices = [(seed + i * 7) % len(emojis) for i in range(min(count, len(emojis)))]
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_indices = []
+    for idx in indices:
+        if idx not in seen:
+            seen.add(idx)
+            unique_indices.append(idx)
+    return [emojis[i] for i in unique_indices[:count]]
+
+
+def create_occasion_embed(
+    *,
+    guild: discord.Guild,
+    special_days: List[str],
+    wish_text: str,
+    custom_emojis: List[str],
+    time_of_day: Optional[str] = None,
+) -> discord.Embed:
+    """Create a beautiful embed for occasional wishes."""
+    
+    time_of_day = time_of_day or get_time_of_day_from_ist()
+    theme = TIME_THEMES.get(time_of_day, TIME_THEMES["Morning"])
+    
+    # Check for holiday-specific theme
+    holiday_theme = get_holiday_theme(special_days)
+    if holiday_theme:
+        theme = {**theme, **holiday_theme}
+    
+    unique_emojis = [e for e in (custom_emojis or []) if isinstance(e, str) and e.strip()]
+    unique_emojis = list(dict.fromkeys(unique_emojis))
+    
+    # Build emoji decoration string
+    emoji_decoration = " ".join(unique_emojis[:3]) if unique_emojis else ""
+    
+    # Create embed
+    embed = discord.Embed(
+        color=theme["color"],
+        timestamp=ist_now(),
+    )
+    
+    # Set author with server info
+    server_icon_url = guild.icon.url if guild.icon else None
+    embed.set_author(
+        name=f"✨ {guild.name} ✨",
+        icon_url=server_icon_url,
+    )
+    
+    # Build title with emojis
+    title_left = unique_emojis[0] if len(unique_emojis) >= 1 else theme["emoji"]
+    title_right = unique_emojis[1] if len(unique_emojis) >= 2 else theme["emoji"]
+    
+    # Format special days for title
+    special_days_str = ", ".join(special_days[:2])  # Limit to 2 for title
+    if len(special_days) > 2:
+        special_days_str += f" (+{len(special_days) - 2} more)"
+    
+    embed.title = f"{title_left} 🎉 Happy {special_days_str}! 🎉 {title_right}"
+    
+    # Clean wish text
+    wish_text = strip_discord_mentions(wish_text)
+    
+    # Build description
+    sparkle_line = "･ﾟ✧ ━━━━━━━━━━━━━━ ✧ﾟ･"
+    
+    description_parts = [
+        f"{sparkle_line}",
+        "",
+        f"{theme['emoji']} **{theme['greeting']}** {theme['emoji']}",
+        "",
+        wish_text,
+        "",
+        f"{sparkle_line}",
+    ]
+    
+    if emoji_decoration:
+        description_parts.append(f"\n{emoji_decoration}")
+    
+    embed.description = "\n".join(description_parts)
+    
+    # Add special days field if more than 2
+    if len(special_days) > 2:
+        embed.add_field(
+            name="🗓️ Today's Celebrations",
+            value="\n".join(f"• {day}" for day in special_days),
+            inline=False,
+        )
+    
+    # Add blessing field
+    embed.add_field(
+        name=f"💝 ── Today's Blessing ── 💝",
+        value=f"> *May your day be filled with joy and celebration!*",
+        inline=False,
+    )
+    
+    # Set thumbnail to server icon
+    if server_icon_url:
+        embed.set_thumbnail(url=server_icon_url)
+    
+    # Footer
+    footer_emoji = unique_emojis[-1] if unique_emojis else "💫"
+    embed.set_footer(
+        text=f"✿ Mitsuha (CSD) ✿ • Wishing you all a wonderful celebration!",
+        icon_url=server_icon_url,
+    )
+    
+    return embed
+
+
+def create_premium_occasion_embed(
+    *,
+    guild: discord.Guild,
+    special_days: List[str],
+    wish_text: str,
+    custom_emojis: List[str],
+    time_of_day: Optional[str] = None,
+) -> List[discord.Embed]:
+    """Create premium-style embeds with server banner if available."""
+    
+    time_of_day = time_of_day or get_time_of_day_from_ist()
+    theme = TIME_THEMES.get(time_of_day, TIME_THEMES["Morning"])
+    
+    # Check for holiday-specific theme
+    holiday_theme = get_holiday_theme(special_days)
+    if holiday_theme:
+        theme = {**theme, **holiday_theme}
+    
+    unique_emojis = [e for e in (custom_emojis or []) if isinstance(e, str) and e.strip()]
+    unique_emojis = list(dict.fromkeys(unique_emojis))
+    
+    server_icon_url = guild.icon.url if guild.icon else None
+    server_banner_url = guild.banner.url if guild.banner else None
+    
+    embeds: List[discord.Embed] = []
+    
+    # Banner embed if available
+    if server_banner_url:
+        banner_embed = discord.Embed(color=theme["color"])
+        banner_embed.set_image(url=server_banner_url)
+        embeds.append(banner_embed)
+    
+    # Main embed
+    main_embed = discord.Embed(
+        color=theme["color"],
+        timestamp=ist_now(),
+    )
+    
+    # Author with server branding
+    main_embed.set_author(
+        name=f"『 {guild.name} 』",
+        icon_url=server_icon_url,
+    )
+    
+    # Stylized title
+    left_deco = unique_emojis[0] if len(unique_emojis) >= 1 else "✦"
+    right_deco = unique_emojis[1] if len(unique_emojis) >= 2 else "✦"
+    center_emoji = theme["emoji"]
+    
+    # Format special days
+    special_days_display = special_days[0] if special_days else "Special Day"
+    main_embed.title = f"{left_deco} ─ {center_emoji} 𝑯𝒂𝒑𝒑𝒚 {special_days_display}! {center_emoji} ─ {right_deco}"
+    
+    # Clean wish text
+    wish_text = strip_discord_mentions(wish_text)
+    
+    # Build beautiful description
+    sparkle_line = "･ﾟ✧ ━━━━━━━━━━━━━━ ✧ﾟ･"
+    emoji_row = " ".join(unique_emojis[:4]) if unique_emojis else f"{theme['emoji']} ✨ 💫 🌟"
+    
+    description = f"""
+{sparkle_line}
+
+{theme['emoji']} **{theme['greeting']}** {theme['emoji']}
+
+{wish_text}
+
+{sparkle_line}
+
+{emoji_row}
+"""
+    
+    main_embed.description = description.strip()
+    
+    # Add all special days as a field if multiple
+    if len(special_days) > 1:
+        main_embed.add_field(
+            name="🗓️ Today We Celebrate",
+            value="\n".join(f"{theme['emoji']} {day}" for day in special_days),
+            inline=False,
+        )
+    
+    # Motivational field
+    main_embed.add_field(
+        name=f"💝 ── Warm Wishes ── 💝",
+        value=f"> *May this special day bring you endless happiness and wonderful memories!*",
+        inline=False,
+    )
+    
+    # Thumbnail
+    if server_icon_url:
+        main_embed.set_thumbnail(url=server_icon_url)
+    
+    # Beautiful footer
+    footer_text = f"✿ Mitsuha (CSD) • {guild.name} ✿ • Celebrating together!"
+    main_embed.set_footer(
+        text=footer_text,
+        icon_url=server_icon_url,
+    )
+    
+    embeds.append(main_embed)
+    return embeds
+
+
 def fetch_special_days_for_ist_date(config: Config, date_ist: datetime.date) -> List[str]:
     """Fetches holiday/special day names for the provided IST date from one or more public Google Calendars."""
     # Query a slightly wider window to avoid edge cases with calendar timezone boundaries,
@@ -514,14 +865,25 @@ async def on_ready():
 
         print(f"Found special day(s): {special_days}")
         dm_wish_body = generate_wish(config, special_days, date_ist=date_ist)
-        channel_wish = generate_channel_wish(config, special_days, date_ist=date_ist)
+        # Generate channel wish text (used inside the embed)
+        channel_wish_text = generate_channel_wish(config, special_days, date_ist=date_ist)
+        # Strip @everyone from embed text (we'll mention in content separately)
+        channel_wish_text_clean = channel_wish_text.replace("@everyone", "").strip()
+        if channel_wish_text_clean.startswith("\n"):
+            channel_wish_text_clean = channel_wish_text_clean[1:]
         print(f"Generated DM wish length: {len(dm_wish_body)}")
-        print(f"Generated channel wish length: {len(channel_wish)}")
+        print(f"Generated channel wish length: {len(channel_wish_text)}")
 
         guild = await get_guild(client, config.guild_id)
         if guild is None:
             print("Guild not found. Check DISCORD_GUILD_ID/GUILD_ID.")
             return
+
+        # Fetch guild emojis for embed decorations
+        emojis, stickers_list = await fetch_guild_emojis_and_stickers(guild)
+        picked_emojis = pick_random_emojis(emojis, count=4, date_ist=date_ist)
+        custom_emoji_strings = [str(e) for e in picked_emojis]
+        print(f"Picked {len(picked_emojis)} custom emojis for embed decoration")
 
         sticker: Optional[discord.Sticker] = None
         if config.sticker_id:
@@ -559,18 +921,42 @@ async def on_ready():
             if sticker is None and candidates:
                 sticker = candidates[_stable_daily_index(date_ist, len(candidates))]
 
-        # Always post the wish in the configured channel (stickers are allowed in-channel).
+        # Create beautiful embed for channel message
+        time_of_day = get_time_of_day_from_ist()
+        wish_embeds = create_premium_occasion_embed(
+            guild=guild,
+            special_days=special_days,
+            wish_text=channel_wish_text_clean,
+            custom_emojis=custom_emoji_strings,
+            time_of_day=time_of_day,
+        )
+        print(f"Created {len(wish_embeds)} embeds for channel message")
+
+        # Post the wish embed in the configured channel
         try:
             channel = await client.fetch_channel(config.fallback_channel_id)
             allowed = discord.AllowedMentions(everyone=True, users=False, roles=False)
+            
+            # Send with @everyone mention in content, embed for visual appeal
+            send_kwargs: dict[str, Any] = {
+                "content": "@everyone",  # Mention everyone in content
+                "embeds": wish_embeds,
+                "allowed_mentions": allowed,
+            }
+            
             if sticker is not None:
                 try:
-                    await channel.send(channel_wish, stickers=[sticker], allowed_mentions=allowed)
+                    send_kwargs["stickers"] = [sticker]
+                    await channel.send(**send_kwargs)
+                    print(f"Sent embed wish with sticker to #{getattr(channel, 'name', 'unknown')}")
                 except discord.HTTPException as exc:
                     print(f"Sticker send failed in channel: {exc}")
-                    await channel.send(channel_wish, allowed_mentions=allowed)
+                    del send_kwargs["stickers"]
+                    await channel.send(**send_kwargs)
+                    print(f"Sent embed wish (without sticker) to #{getattr(channel, 'name', 'unknown')}")
             else:
-                await channel.send(channel_wish, allowed_mentions=allowed)
+                await channel.send(**send_kwargs)
+                print(f"Sent embed wish to #{getattr(channel, 'name', 'unknown')}")
         except Exception as exc:
             print(f"Failed to post wish in channel {config.fallback_channel_id}: {exc}")
 
