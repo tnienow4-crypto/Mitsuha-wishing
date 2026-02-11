@@ -376,6 +376,102 @@ HOLIDAY_THEMES = {
 _MENTION_RE = re.compile(r"<@&?\d+>|<@!?\d+>")
 _CUSTOM_EMOJI_RE = re.compile(r"<a?:[A-Za-z0-9_~]+:\d+>")
 
+# --------------------------------------------------------------------------- #
+# NARUTO FONTS HEADING BUILDER
+# --------------------------------------------------------------------------- #
+
+def build_naruto_font_heading(
+    text: str,
+    guild_emojis: List[Any],
+    *,
+    prefix: str = "Naruto",
+    space_gap: str = "  ",
+    fallback_style: bool = True,
+) -> str:
+    """Convert *text* into a heading made of NarutoFonts custom emojis.
+
+    Each letter A-Z is looked up as ``<:NarutoFontsA:id>`` etc.  Characters
+    without a matching emoji are kept as-is (stylized bold if *fallback_style*).
+    Spaces become *space_gap*.
+    """
+    # Build lookup: lowered suffix letter -> emoji token string
+    lookup: dict[str, str] = {}
+    for e in guild_emojis:
+        name = getattr(e, "name", "") or ""
+        if not name.lower().startswith(prefix.lower()):
+            continue
+        suffix = name[len(prefix):].lower()
+        if len(suffix) == 1 and suffix.isalpha():
+            lookup[suffix] = str(e)
+
+    parts: List[str] = []
+    for ch in text:
+        low = ch.lower()
+        if low in lookup:
+            parts.append(lookup[low])
+        elif ch == " ":
+            parts.append(space_gap)
+        else:
+            # For digits/punctuation keep the character; bold-stylize if wanted
+            parts.append(f"**{ch}**" if fallback_style else ch)
+    return " ".join(parts) if parts else text
+
+
+def _naruto_font_available(guild_emojis: List[Any], prefix: str = "Naruto") -> bool:
+    """Return True if at least 10 Naruto letter emojis exist (NarutoA..NarutoZ)."""
+    count = 0
+    for e in guild_emojis:
+        name = getattr(e, "name", "") or ""
+        if name.lower().startswith(prefix.lower()):
+            suffix = name[len(prefix):]
+            if len(suffix) == 1 and suffix.isalpha():
+                count += 1
+    return count >= 10
+
+
+# --------------------------------------------------------------------------- #
+# DAY DESCRIPTION GENERATOR
+# --------------------------------------------------------------------------- #
+
+def generate_day_description(
+    config: Config,
+    special_days: List[str],
+    *,
+    date_ist: Optional[datetime.date] = None,
+) -> str:
+    """Generate a short description about the special day(s): where celebrated & significance."""
+    joined = ", ".join(special_days)
+    date_ist = date_ist or ist_now().date()
+    date_str = datetime.datetime.combine(date_ist, datetime.time.min).strftime("%d %b %Y")
+
+    prompt = (
+        "Write a SHORT informative blurb (3-5 sentences, max 400 characters) about the following "
+        "holiday/special day(s).  Include:\n"
+        "1. Where in the world it is mainly celebrated\n"
+        "2. Why the day is significant / its history in 1-2 lines\n"
+        "Do NOT use hashtags, do NOT mention Discord.  Keep it factual and warm.\n\n"
+        f"Date: {date_str}\n"
+        f"Day(s): {joined}\n"
+    )
+
+    try:
+        from ollama import Client as OllamaClient
+        ollama_client = OllamaClient(
+            host=config.ollama_host,
+            headers={"Authorization": "Bearer " + config.ollama_api_key} if config.ollama_api_key else None,
+        )
+        response = ollama_client.chat(
+            model=config.ollama_model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = ((response or {}).get("message") or {}).get("content")
+        if isinstance(text, str) and text.strip():
+            return text.strip()[:500]
+    except Exception as exc:
+        print(f"Error generating day description: {exc}")
+
+    return f"{joined} — a day celebrated around the world!"
+
 
 def strip_discord_mentions(text: str) -> str:
     """Remove Discord mentions from text."""
@@ -572,73 +668,99 @@ def create_premium_occasion_embed(
     wish_text: str,
     custom_emojis: List[str],
     time_of_day: Optional[str] = None,
+    day_description: str = "",
+    naruto_heading: str = "",
 ) -> List[discord.Embed]:
-    """Create premium-style embeds with server banner if available."""
-    
+    """Create premium-style embeds with NarutoFonts heading and day description."""
+
     time_of_day = time_of_day or get_time_of_day_from_ist()
     theme = TIME_THEMES.get(time_of_day, TIME_THEMES["Morning"])
-    
+
     # Check for holiday-specific theme
     holiday_theme = get_holiday_theme(special_days)
     if holiday_theme:
         theme = {**theme, **holiday_theme}
-    
+
     unique_emojis = [e for e in (custom_emojis or []) if isinstance(e, str) and e.strip()]
     unique_emojis = list(dict.fromkeys(unique_emojis))
-    
+
     server_icon_url = guild.icon.url if guild.icon else None
     server_banner_url = guild.banner.url if guild.banner else None
-    
+
     embeds: List[discord.Embed] = []
-    
-    # Banner embed if available
+
+    # ── Banner embed ──
     if server_banner_url:
         banner_embed = discord.Embed(color=theme["color"])
         banner_embed.set_image(url=server_banner_url)
         embeds.append(banner_embed)
-    
-    # Main embed
+
+    # ── Heading embed (NarutoFonts big-letter day name) ──
+    heading_embed = discord.Embed(color=theme["color"])
+
+    center_emoji = theme["emoji"]
+    sparkle = "✦"
+    top_border    = f"{sparkle}{'═' * 30}{sparkle}"
+    bottom_border = f"{sparkle}{'═' * 30}{sparkle}"
+
+    if naruto_heading:
+        heading_body = (
+            f"{top_border}\n\n"
+            f"{center_emoji}  {naruto_heading}  {center_emoji}\n\n"
+            f"{bottom_border}"
+        )
+    else:
+        special_days_display = special_days[0] if special_days else "Special Day"
+        heading_body = (
+            f"{top_border}\n\n"
+            f"{center_emoji}  **𝗛 𝗔 𝗣 𝗣 𝗬   {special_days_display.upper()}!**  {center_emoji}\n\n"
+            f"{bottom_border}"
+        )
+
+    heading_embed.description = heading_body
+    embeds.append(heading_embed)
+
+    # ── Main wish embed ──
     main_embed = discord.Embed(
         color=theme["color"],
         timestamp=ist_now(),
     )
-    
+
     # Author with server branding
     main_embed.set_author(
         name=f"『 {guild.name} 』",
         icon_url=server_icon_url,
     )
-    
-    # Stylized title
-    left_deco = unique_emojis[0] if len(unique_emojis) >= 1 else "✦"
-    right_deco = unique_emojis[1] if len(unique_emojis) >= 2 else "✦"
-    center_emoji = theme["emoji"]
-    
-    # Format special days
-    special_days_display = special_days[0] if special_days else "Special Day"
-    main_embed.title = f"{left_deco} ─ {center_emoji} 𝑯𝒂𝒑𝒑𝒚 {special_days_display}! {center_emoji} ─ {right_deco}"
-    
+
     # Clean wish text
     wish_text = strip_discord_mentions(wish_text)
-    
+
     # Build beautiful description
-    sparkle_line = "･ﾟ✧ ━━━━━━━━━━━━━━ ✧ﾟ･"
+    sparkle_line = "·˚✧ ━━━━━━━━━━━━━━ ✧˚·"
     emoji_row = " ".join(unique_emojis[:4]) if unique_emojis else f"{theme['emoji']} ✨ 💫 🌟"
-    
-    description = f"""
-{sparkle_line}
 
-{theme['emoji']} **{theme['greeting']}** {theme['emoji']}
+    description_parts = [
+        sparkle_line,
+        "",
+        f"{theme['emoji']} **{theme['greeting']}** {theme['emoji']}",
+        "",
+        wish_text,
+        "",
+        sparkle_line,
+        "",
+        emoji_row,
+    ]
 
-{wish_text}
+    main_embed.description = "\n".join(description_parts).strip()
 
-{sparkle_line}
+    # ── Day description field (where & why) ──
+    if day_description:
+        main_embed.add_field(
+            name=f"📖 ── About This Day ── 📖",
+            value=f"> {day_description}",
+            inline=False,
+        )
 
-{emoji_row}
-"""
-    
-    main_embed.description = description.strip()
-    
     # Add all special days as a field if multiple
     if len(special_days) > 1:
         main_embed.add_field(
@@ -646,25 +768,25 @@ def create_premium_occasion_embed(
             value="\n".join(f"{theme['emoji']} {day}" for day in special_days),
             inline=False,
         )
-    
-    # Motivational field
+
+    # Warm wishes field
     main_embed.add_field(
         name=f"💝 ── Warm Wishes ── 💝",
         value=f"> *May this special day bring you endless happiness and wonderful memories!*",
         inline=False,
     )
-    
+
     # Thumbnail
     if server_icon_url:
         main_embed.set_thumbnail(url=server_icon_url)
-    
+
     # Beautiful footer
     footer_text = f"✿ Mitsuha (CSD) • {guild.name} ✿ • Celebrating together!"
     main_embed.set_footer(
         text=footer_text,
         icon_url=server_icon_url,
     )
-    
+
     embeds.append(main_embed)
     return embeds
 
@@ -813,16 +935,44 @@ def generate_channel_wish(
     return f"@everyone\nHappy {joined}! Wishing you all a bright day together. — Mitsuha (CSD)"
 
 
-def personalize_dm_message(wish_body: str, display_name: str) -> str:
+def personalize_dm_message(
+    wish_body: str,
+    display_name: str,
+    *,
+    naruto_heading: str = "",
+    day_description: str = "",
+    special_days: Optional[List[str]] = None,
+) -> str:
     name = (display_name or "").strip() or "there"
-    # Same wish for everyone; only the name changes.
-    return (
-        f"Hey {name} ✨\n"
-        f"⋆｡°✩⋆｡°✩⋆｡°✩\n\n"
-        f"{wish_body}\n\n"
-        f"⋆｡°✩⋆｡°✩⋆｡°✩\n"
-        f"P.S. {name}… if you want, say hi back — I'd really love to be friends 🌸"
-    )
+    border = "✦══════════════════════════✦"
+    sparkle = "·˚✧ ━━━━━━━━━━ ✧˚·"
+
+    parts: List[str] = [f"Hey {name} ✨", sparkle, ""]
+
+    # ── Big NarutoFonts heading ──
+    if naruto_heading:
+        parts.append(naruto_heading)
+        parts.append("")
+    elif special_days:
+        # Fallback bold heading
+        day_title = " / ".join(special_days[:2])
+        parts.append(f"🎉 **𝗛 𝗔 𝗣 𝗣 𝗬   {day_title.upper()}!** 🎉")
+        parts.append("")
+
+    # ── Day description ──
+    if day_description:
+        parts.append(f"📖 *{day_description}*")
+        parts.append("")
+        parts.append(sparkle)
+        parts.append("")
+
+    # ── Wish body ──
+    parts.append(wish_body)
+    parts.append("")
+    parts.append(sparkle)
+    parts.append(f"P.S. {name}… if you want, say hi back — I'd really love to be friends 🌸")
+
+    return "\n".join(parts)
 
 
 async def get_guild(client_: discord.Client, guild_id: int) -> Optional[discord.Guild]:
@@ -871,6 +1021,9 @@ async def on_ready():
         channel_wish_text_clean = channel_wish_text.replace("@everyone", "").strip()
         if channel_wish_text_clean.startswith("\n"):
             channel_wish_text_clean = channel_wish_text_clean[1:]
+        # Generate day description (where celebrated & significance)
+        day_description = generate_day_description(config, special_days, date_ist=date_ist)
+        print(f"Day description: {day_description[:80]}...")
         print(f"Generated DM wish length: {len(dm_wish_body)}")
         print(f"Generated channel wish length: {len(channel_wish_text)}")
 
@@ -884,6 +1037,15 @@ async def on_ready():
         picked_emojis = pick_random_emojis(emojis, count=4, date_ist=date_ist)
         custom_emoji_strings = [str(e) for e in picked_emojis]
         print(f"Picked {len(picked_emojis)} custom emojis for embed decoration")
+
+        # Build NarutoFonts heading for the special day
+        naruto_heading = ""
+        if _naruto_font_available(emojis):
+            day_title = special_days[0] if special_days else "Special Day"
+            naruto_heading = build_naruto_font_heading(day_title, emojis)
+            print(f"NarutoFonts heading built ({len(naruto_heading)} chars)")
+        else:
+            print("NarutoFonts emojis not found (need >=10 letters). Using bold fallback.")
 
         sticker: Optional[discord.Sticker] = None
         if config.sticker_id:
@@ -929,6 +1091,8 @@ async def on_ready():
             wish_text=channel_wish_text_clean,
             custom_emojis=custom_emoji_strings,
             time_of_day=time_of_day,
+            day_description=day_description,
+            naruto_heading=naruto_heading,
         )
         print(f"Created {len(wish_embeds)} embeds for channel message")
 
@@ -967,7 +1131,13 @@ async def on_ready():
         async for member in iter_human_members(guild):
             try:
                 # DMs are always text-only. (Guild stickers are not permitted in DMs.)
-                dm_text = personalize_dm_message(dm_wish_body, member.display_name)
+                dm_text = personalize_dm_message(
+                    dm_wish_body,
+                    member.display_name,
+                    naruto_heading=naruto_heading,
+                    day_description=day_description,
+                    special_days=special_days,
+                )
                 await member.send(dm_text)
                 if member.id in dm_disabled_updated:
                     dm_disabled_updated.discard(member.id)

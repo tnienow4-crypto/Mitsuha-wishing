@@ -7,10 +7,13 @@ import discord
 
 from main import (
     _stable_daily_index,
+    _naruto_font_available,
+    build_naruto_font_heading,
     create_premium_occasion_embed,
     fetch_guild_emojis_and_stickers,
     fetch_special_days_for_ist_date,
     generate_channel_wish,
+    generate_day_description,
     get_time_of_day_from_ist,
     load_config,
     pick_random_emojis,
@@ -51,6 +54,19 @@ async def run(*, date_ist: datetime.date, channel_id: int | None) -> int:
                 picked_emojis = pick_random_emojis(emojis, count=4, date_ist=date_ist)
                 custom_emoji_strings = [str(e) for e in picked_emojis]
                 print(f"Picked {len(picked_emojis)} custom emojis for embed decoration")
+
+                # Build NarutoFonts heading
+                naruto_heading = ""
+                if _naruto_font_available(emojis):
+                    day_title = special_days[0] if special_days else "Special Day"
+                    naruto_heading = build_naruto_font_heading(day_title, emojis)
+                    print(f"NarutoFonts heading built ({len(naruto_heading)} chars)")
+                else:
+                    print("NarutoFonts emojis not found. Using bold fallback.")
+
+                # Generate day description
+                day_description = generate_day_description(config, special_days, date_ist=date_ist)
+                print(f"Day description: {day_description[:80]}...")
 
                 # Resolve a CSD sticker the same way main.py does.
                 sticker = None
@@ -103,6 +119,8 @@ async def run(*, date_ist: datetime.date, channel_id: int | None) -> int:
                     wish_text=wish_message_clean,
                     custom_emojis=custom_emoji_strings,
                     time_of_day=time_of_day,
+                    day_description=day_description,
+                    naruto_heading=naruto_heading,
                 )
                 print(f"Created {len(wish_embeds)} embeds for channel message")
 

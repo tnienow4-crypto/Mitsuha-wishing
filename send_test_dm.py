@@ -6,7 +6,10 @@ import discord
 
 from main import (
     _stable_daily_index,
+    _naruto_font_available,
+    build_naruto_font_heading,
     fetch_special_days_for_ist_date,
+    generate_day_description,
     generate_wish,
     load_config,
     personalize_dm_message,
@@ -30,6 +33,24 @@ async def run(user_id: int, date_ist: datetime.date) -> int:
                 return
 
             wish_message = generate_wish(config, special_days, date_ist=date_ist)
+
+            # Generate day description (where celebrated & significance)
+            day_description = generate_day_description(config, special_days, date_ist=date_ist)
+            print(f"Day description: {day_description[:80]}...")
+
+            # Build NarutoFonts heading from guild emojis
+            naruto_heading = ""
+            try:
+                guild = await client.fetch_guild(config.guild_id)
+                guild_emojis = await guild.fetch_emojis()
+                if _naruto_font_available(guild_emojis):
+                    day_title = special_days[0] if special_days else "Special Day"
+                    naruto_heading = build_naruto_font_heading(day_title, guild_emojis)
+                    print(f"NarutoFonts heading built ({len(naruto_heading)} chars)")
+                else:
+                    print("NarutoFonts emojis not found. Using bold fallback.")
+            except Exception as exc:
+                print(f"Could not build NarutoFonts heading: {exc}")
 
             # Resolve a CSD sticker the same way main.py does.
             sticker = None
@@ -81,7 +102,13 @@ async def run(user_id: int, date_ist: datetime.date) -> int:
                     or getattr(user, "name", None)
                     or "there"
                 )
-                dm_text = personalize_dm_message(wish_message, str(display_name))
+                dm_text = personalize_dm_message(
+                    wish_message,
+                    str(display_name),
+                    naruto_heading=naruto_heading,
+                    day_description=day_description,
+                    special_days=special_days,
+                )
                 if sticker is not None:
                     try:
                         await user.send(dm_text, stickers=[sticker])
