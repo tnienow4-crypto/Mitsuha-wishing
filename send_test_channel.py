@@ -8,7 +8,7 @@ import discord
 from main import (
     _stable_daily_index,
     _naruto_font_available,
-    build_naruto_font_heading,
+    build_naruto_font_heading_all_days,
     create_premium_occasion_embed,
     fetch_guild_emojis_and_stickers,
     fetch_special_days_for_ist_date,
@@ -55,11 +55,10 @@ async def run(*, date_ist: datetime.date, channel_id: int | None) -> int:
                 custom_emoji_strings = [str(e) for e in picked_emojis]
                 print(f"Picked {len(picked_emojis)} custom emojis for embed decoration")
 
-                # Build NarutoFonts heading
+                # Build NarutoFonts heading (all holidays)
                 naruto_heading = ""
                 if _naruto_font_available(emojis):
-                    day_title = special_days[0] if special_days else "Special Day"
-                    naruto_heading = build_naruto_font_heading(day_title, emojis)
+                    naruto_heading = build_naruto_font_heading_all_days(special_days, emojis)
                     print(f"NarutoFonts heading built ({len(naruto_heading)} chars)")
                 else:
                     print("NarutoFonts emojis not found. Using bold fallback.")
@@ -86,19 +85,14 @@ async def run(*, date_ist: datetime.date, channel_id: int | None) -> int:
                         print(f"Sticker: failed to fetch guild stickers: {exc}")
                         stickers = []
 
-                    prefix = (config.sticker_prefix or "").strip()
-                    candidates = [
-                        s
-                        for s in stickers
-                        if prefix and (getattr(s, "name", "") or "").lower().startswith(prefix.lower())
-                    ]
+                    candidates = list(stickers)  # use ANY guild sticker
 
                     if candidates:
                         if config.sticker_pick_mode == "ai":
                             sticker = pick_sticker_by_ai(
                                 config,
                                 stickers=candidates,
-                                prefix=prefix,
+                                prefix="",
                                 date_ist=date_ist,
                                 special_days=special_days,
                             )
@@ -109,7 +103,7 @@ async def run(*, date_ist: datetime.date, channel_id: int | None) -> int:
                             sticker = candidates[_stable_daily_index(date_ist, len(candidates))]
                             print(f"Sticker: daily picked '{getattr(sticker, 'name', '')}'")
                     else:
-                        print(f"Sticker: no guild stickers found with prefix '{prefix}'")
+                        print("Sticker: no guild stickers found")
 
                 # Create beautiful embed
                 time_of_day = get_time_of_day_from_ist()

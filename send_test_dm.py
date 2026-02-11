@@ -7,7 +7,7 @@ import discord
 from main import (
     _stable_daily_index,
     _naruto_font_available,
-    build_naruto_font_heading,
+    build_naruto_font_heading_all_days,
     fetch_special_days_for_ist_date,
     generate_day_description,
     generate_wish,
@@ -38,21 +38,20 @@ async def run(user_id: int, date_ist: datetime.date) -> int:
             day_description = generate_day_description(config, special_days, date_ist=date_ist)
             print(f"Day description: {day_description[:80]}...")
 
-            # Build NarutoFonts heading from guild emojis
+            # Build NarutoFonts heading from guild emojis (all holidays)
             naruto_heading = ""
             try:
                 guild = await client.fetch_guild(config.guild_id)
                 guild_emojis = await guild.fetch_emojis()
                 if _naruto_font_available(guild_emojis):
-                    day_title = special_days[0] if special_days else "Special Day"
-                    naruto_heading = build_naruto_font_heading(day_title, guild_emojis)
+                    naruto_heading = build_naruto_font_heading_all_days(special_days, guild_emojis)
                     print(f"NarutoFonts heading built ({len(naruto_heading)} chars)")
                 else:
                     print("NarutoFonts emojis not found. Using bold fallback.")
             except Exception as exc:
                 print(f"Could not build NarutoFonts heading: {exc}")
 
-            # Resolve a CSD sticker the same way main.py does.
+            # Resolve sticker — use any guild sticker randomly
             sticker = None
             if config.sticker_id:
                 try:
@@ -69,19 +68,14 @@ async def run(user_id: int, date_ist: datetime.date) -> int:
                     print(f"Sticker: failed to fetch guild stickers: {exc}")
                     stickers = []
 
-                prefix = (config.sticker_prefix or "").strip()
-                candidates = [
-                    s
-                    for s in stickers
-                    if prefix and (getattr(s, "name", "") or "").lower().startswith(prefix.lower())
-                ]
+                candidates = list(stickers)  # use ANY guild sticker
 
                 if candidates:
                     if config.sticker_pick_mode == "ai":
                         sticker = pick_sticker_by_ai(
                             config,
                             stickers=candidates,
-                            prefix=prefix,
+                            prefix="",
                             date_ist=date_ist,
                             special_days=special_days,
                         )
@@ -92,7 +86,7 @@ async def run(user_id: int, date_ist: datetime.date) -> int:
                         sticker = candidates[_stable_daily_index(date_ist, len(candidates))]
                         print(f"Sticker: daily picked '{getattr(sticker, 'name', '')}'")
                 else:
-                    print(f"Sticker: no guild stickers found with prefix '{prefix}'")
+                    print("Sticker: no guild stickers found")
 
             try:
                 user = await client.fetch_user(user_id)

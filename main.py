@@ -414,7 +414,22 @@ def build_naruto_font_heading(
         else:
             # For digits/punctuation keep the character; bold-stylize if wanted
             parts.append(f"**{ch}**" if fallback_style else ch)
-    return " ".join(parts) if parts else text
+    return "".join(parts) if parts else text
+
+
+def build_naruto_font_heading_all_days(
+    special_days: List[str],
+    guild_emojis: List[Any],
+    *,
+    separator: str = "  ᐧ  ",
+) -> str:
+    """Build a NarutoFonts heading that includes ALL special days, separated visually."""
+    if not special_days:
+        return ""
+    rendered: List[str] = []
+    for day in special_days:
+        rendered.append(build_naruto_font_heading(day, guild_emojis, space_gap="\u2005\u2005"))
+    return separator.join(rendered)
 
 
 def _naruto_font_available(guild_emojis: List[Any], prefix: str = "Naruto") -> bool:
@@ -706,11 +721,12 @@ def create_premium_occasion_embed(
     if naruto_heading:
         heading_body = (
             f"{top_border}\n\n"
-            f"{center_emoji}  {naruto_heading}  {center_emoji}\n\n"
+            f"{center_emoji} {naruto_heading} {center_emoji}\n\n"
             f"{bottom_border}"
         )
     else:
-        special_days_display = special_days[0] if special_days else "Special Day"
+        # Fallback: list ALL holidays in bold
+        special_days_display = " / ".join(special_days) if special_days else "Special Day"
         heading_body = (
             f"{top_border}\n\n"
             f"{center_emoji}  **𝗛 𝗔 𝗣 𝗣 𝗬   {special_days_display.upper()}!**  {center_emoji}\n\n"
@@ -949,13 +965,13 @@ def personalize_dm_message(
 
     parts: List[str] = [f"Hey {name} ✨", sparkle, ""]
 
-    # ── Big NarutoFonts heading ──
+    # ── Big NarutoFonts heading (all holidays) ──
     if naruto_heading:
         parts.append(naruto_heading)
         parts.append("")
     elif special_days:
-        # Fallback bold heading
-        day_title = " / ".join(special_days[:2])
+        # Fallback bold heading — list ALL holidays
+        day_title = " / ".join(special_days)
         parts.append(f"🎉 **𝗛 𝗔 𝗣 𝗣 𝗬   {day_title.upper()}!** 🎉")
         parts.append("")
 
@@ -1038,16 +1054,22 @@ async def on_ready():
         custom_emoji_strings = [str(e) for e in picked_emojis]
         print(f"Picked {len(picked_emojis)} custom emojis for embed decoration")
 
-        # Build NarutoFonts heading for the special day
+        # Build NarutoFonts heading for ALL special days
         naruto_heading = ""
         if _naruto_font_available(emojis):
-            day_title = special_days[0] if special_days else "Special Day"
-            naruto_heading = build_naruto_font_heading(day_title, emojis)
+            naruto_heading = build_naruto_font_heading_all_days(special_days, emojis)
             print(f"NarutoFonts heading built ({len(naruto_heading)} chars)")
         else:
             print("NarutoFonts emojis not found (need >=10 letters). Using bold fallback.")
 
         sticker: Optional[discord.Sticker] = None
+        # Use any guild sticker — pick randomly (stable per day)
+        try:
+            all_stickers = await guild.fetch_stickers()
+        except Exception as exc:
+            print(f"Could not fetch guild stickers: {exc}")
+            all_stickers = []
+
         if config.sticker_id:
             sticker = await resolve_sticker(
                 client,
@@ -1056,20 +1078,8 @@ async def on_ready():
                 sticker_prefix=config.sticker_prefix,
                 date_ist=date_ist,
             )
-        else:
-            # Fetch guild stickers once.
-            try:
-                all_stickers = await guild.fetch_stickers()
-            except Exception as exc:
-                print(f"Could not fetch guild stickers: {exc}")
-                all_stickers = []
-
-            prefix = (config.sticker_prefix or "").strip()
-            candidates = [
-                s
-                for s in all_stickers
-                if prefix and (getattr(s, "name", "") or "").lower().startswith(prefix.lower())
-            ]
+        elif all_stickers:
+            candidates = list(all_stickers)
 
             if config.sticker_pick_mode == "ai" and candidates:
                 sticker = pick_sticker_by_ai(

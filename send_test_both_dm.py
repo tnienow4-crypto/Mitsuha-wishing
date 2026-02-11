@@ -9,7 +9,7 @@ import discord
 from main import (
     _naruto_font_available,
     _stable_daily_index,
-    build_naruto_font_heading,
+    build_naruto_font_heading_all_days,
     create_premium_occasion_embed,
     fetch_guild_emojis_and_stickers,
     fetch_special_days_for_ist_date,
@@ -57,22 +57,17 @@ async def run(user_id: int, date_ist: datetime.date) -> int:
                 custom_emoji_strings = [str(e) for e in picked_emojis]
                 print(f"Picked {len(picked_emojis)} custom emojis")
 
-                # ── Build NarutoFonts heading ──
+                # ── Build NarutoFonts heading (all holidays) ──
                 naruto_heading = ""
                 if _naruto_font_available(emojis):
-                    day_title = special_days[0] if special_days else "Special Day"
-                    naruto_heading = build_naruto_font_heading(day_title, emojis)
+                    naruto_heading = build_naruto_font_heading_all_days(special_days, emojis)
                     print(f"NarutoFonts heading built ({len(naruto_heading)} chars)")
                 else:
                     print("NarutoFonts emojis not available. Using bold fallback.")
 
-                # ── Resolve sticker ──
+                # ── Resolve sticker (any guild sticker, random) ──
                 sticker = None
-                prefix = (config.sticker_prefix or "").strip()
-                candidates = [
-                    s for s in stickers_list
-                    if prefix and (getattr(s, "name", "") or "").lower().startswith(prefix.lower())
-                ]
+                candidates = list(stickers_list) if stickers_list else []
                 if config.sticker_id:
                     try:
                         sticker = await client.fetch_sticker(config.sticker_id)
@@ -81,7 +76,7 @@ async def run(user_id: int, date_ist: datetime.date) -> int:
                 elif candidates:
                     if config.sticker_pick_mode == "ai":
                         sticker = pick_sticker_by_ai(
-                            config, stickers=candidates, prefix=prefix,
+                            config, stickers=candidates, prefix="",
                             date_ist=date_ist, special_days=special_days,
                         )
                     if sticker is None:
