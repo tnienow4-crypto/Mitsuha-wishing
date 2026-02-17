@@ -1085,7 +1085,7 @@ async def on_ready():
                 sticker = pick_sticker_by_ai(
                     config,
                     stickers=candidates,
-                    prefix=prefix,
+                    prefix=config.sticker_prefix,
                     date_ist=date_ist,
                     special_days=special_days,
                 )
